@@ -314,6 +314,17 @@ body::before{content:'';position:fixed;top:-50%;left:-50%;width:200%;height:200%
                     <option value="0">♾️ Unlimited</option>
                 </select>
             </div>
+            <div class="field">
+                <label>Total Turns (per player)</label>
+                <select id="localTurns">
+                    <option value="10">10 turns</option>
+                    <option value="20">20 turns</option>
+                    <option value="30" selected>30 turns</option>
+                    <option value="50">50 turns</option>
+                    <option value="100">100 turns</option>
+                    <option value="0">♾️ Unlimited</option>
+                </select>
+            </div>
             <div id="localNames" class="pnames"></div>
             <button id="localStartBtn" class="pbtn">Start Local Game</button>
         </div>
@@ -324,6 +335,7 @@ body::before{content:'';position:fixed;top:-50%;left:-50%;width:200%;height:200%
             <div class="field"><label>Your Name</label><input id="hostName" maxlength="18" placeholder="Enter your name" /></div>
             <div class="field"><label>Players</label><select id="onlineCount"><option value="2">2 Players</option><option value="3">3 Players</option><option value="4">4 Players</option></select></div>
             <div class="field"><label>Turn Timer</label><select id="onlineTimer"><option value="30">30 sec</option><option value="60" selected>60 sec</option><option value="90">90 sec</option><option value="120">2 min</option><option value="0">♾️ Unlimited</option></select></div>
+            <div class="field"><label>Total Turns (per player)</label><select id="onlineTurns"><option value="10">10</option><option value="20">20</option><option value="30" selected>30</option><option value="50">50</option><option value="100">100</option><option value="0">♾️ Unlimited</option></select></div>
             <button id="createBtn" class="pbtn">Create Room</button>
             <div class="divider"></div>
             <h2>🔗 Join Game</h2>
@@ -361,7 +373,7 @@ body::before{content:'';position:fixed;top:-50%;left:-50%;width:200%;height:200%
         <div class="stitle">Players</div>
         <div id="pList" class="plist"></div>
         <div class="ibox" id="roomInfoBox"><div class="ibox-l">Room</div><div class="ibox-code" id="gRoomCode">LOCAL</div></div>
-        <div class="ibox" style="margin-top:6px"><div class="ibox-l">Turn</div><div class="ibox-v" id="gTurn">1</div></div>
+        <div class="ibox" style="margin-top:6px"><div class="ibox-l">Turn</div><div class="ibox-v" id="gTurn">1 / 30</div></div>
         <div class="ibox" style="margin-top:6px"><div class="ibox-l">Words Found</div><div class="ibox-v" id="gWords">0</div></div>
         <div class="sactions">
             <button class="sact sact-copy" id="gCopyBtn">📋 Copy Invite</button>
@@ -409,7 +421,10 @@ body::before{content:'';position:fixed;top:-50%;left:-50%;width:200%;height:200%
 const C = {
     BS: 12, TT: 60, MAX_SKIP: 6,
     API: 'https://api.dictionaryapi.dev/api/v2/entries/en/',
-    DICT_URL: 'https://raw.githubusercontent.com/dwyl/english-words/master/words_alpha.txt',
+    DICT_URLS: [
+        'https://cdn.jsdelivr.net/gh/dwyl/english-words@master/words_alpha.txt',
+        'https://raw.githubusercontent.com/dwyl/english-words/master/words_alpha.txt',
+    ],
     COLORS: ['#6366f1','#f43f5e','#22d3a7','#fbbf24'],
     CTR: {r:5,c:5},
     PRE: 'wg-r-',
@@ -423,44 +438,51 @@ const DIRS = [
 
 /* ===========================================================
    OFFLINE DICTIONARY — loaded once, instant lookups
+   Uses document.getElementById directly ($ helper not yet defined)
 =========================================================== */
 const DICT = new Set();
 let dictReady = false;
 
-async function loadDictionary() {
-    const overlay = $('dictOverlay');
-    const badge = $('dictBadge');
-    const progress = $('dictProgress');
-    try {
-        progress.textContent = 'Downloading word list...';
-        const resp = await fetch(C.DICT_URL);
-        if (!resp.ok) throw new Error('HTTP ' + resp.status);
-        progress.textContent = 'Processing words...';
-        const text = await resp.text();
-        const words = text.split(/\r?\n/);
-        let count = 0;
-        for (const w of words) {
-            const trimmed = w.trim().toLowerCase();
-            if (trimmed.length >= 2 && trimmed.length <= C.BS && /^[a-z]+$/.test(trimmed)) {
-                DICT.add(trimmed);
-                count++;
+(async function loadDictionary() {
+    const gid = id => document.getElementById(id);
+    const overlay = gid('dictOverlay');
+    const badge = gid('dictBadge');
+    const progress = gid('dictProgress');
+
+    for (const url of C.DICT_URLS) {
+        try {
+            progress.textContent = 'Downloading word list...';
+            const resp = await fetch(url);
+            if (!resp.ok) throw new Error('HTTP ' + resp.status);
+            progress.textContent = 'Processing words...';
+            const text = await resp.text();
+            const words = text.split(/\r?\n/);
+            let count = 0;
+            for (const w of words) {
+                const t = w.trim().toLowerCase();
+                if (t.length >= 2 && t.length <= C.BS && /^[a-z]+$/.test(t)) {
+                    DICT.add(t);
+                    count++;
+                }
             }
+            dictReady = true;
+            badge.className = 'dict-badge loaded';
+            badge.textContent = `📖 ${(count/1000).toFixed(0)}K words`;
+            overlay.style.opacity = '0';
+            setTimeout(() => overlay.remove(), 400);
+            console.log(`Dictionary loaded: ${count} words from ${url}`);
+            return; // Success — stop trying other URLs
+        } catch (err) {
+            console.warn('Dict source failed:', url, err);
+            progress.textContent = 'Retrying alternate source...';
         }
-        dictReady = true;
-        badge.className = 'dict-badge loaded';
-        badge.textContent = `📖 ${(count/1000).toFixed(0)}K words`;
-        overlay.style.opacity = '0';
-        setTimeout(() => overlay.remove(), 400);
-        console.log(`Dictionary loaded: ${count} words`);
-    } catch (err) {
-        console.error('Dict load error:', err);
-        progress.textContent = 'Failed to load — using online API as fallback';
-        badge.className = 'dict-badge error';
-        badge.textContent = '📖 API fallback';
-        setTimeout(() => overlay.remove(), 2000);
     }
-}
-loadDictionary();
+    // All sources failed
+    progress.textContent = 'Could not load dictionary. Check your internet connection and refresh.';
+    badge.className = 'dict-badge error';
+    badge.textContent = '📖 Failed';
+    // Don't auto-dismiss — user needs to refresh
+})();
 
 /* ===========================================================
    SOUND
@@ -473,7 +495,7 @@ const SFX=(()=>{let x;function g(){if(!x)x=new(window.AudioContext||window.webki
 const S = {
     mode: 'local', // 'local' | 'online'
     peer: null, isHost: false, myId: null, myName: '', roomCode: '', conns: [], hostConn: null,
-    players: [], board: [], history: [], curPI: 0, turn: 1, skips: 0,
+    players: [], board: [], history: [], curPI: 0, turn: 1, skips: 0, maxTurns: 30,
     started: false, over: false,
     pickedLetter: null, selectedCell: null,
     timerInt: null, timerVal: C.TT,
@@ -570,6 +592,7 @@ $('localStartBtn').addEventListener('click',()=>{
     if(unique.size!==names.length){toast('Each player needs a unique name.','er');return}
     S.mode='local';
     S.customTimer=Number($('localTimer').value);
+    S.maxTurns=Number($('localTurns').value);
     startGame(names);
 });
 
@@ -579,11 +602,13 @@ function startGame(names){
     S.started=true;S.over=false;S.scoredKeys=new Set();S.justCells=new Set();S.wordHiCells=new Set();
     S.pickedLetter=null;S.selectedCell=null;
     C.TT=S.customTimer||60;
+    if(!S.maxTurns)S.maxTurns=0; // 0 = unlimited
     $('roomInfoBox').style.display=S.mode==='local'?'none':'';
     showScr('gameScr');renderAll();startTimer();
     setConn(true,S.mode==='local'?'Local Game':'Online');
     const timerTxt=C.TT===0?'No timer':'Timer: '+C.TT+'s';
-    SFX.ok();toast(`Game started! ${timerTxt}. ${S.players[0].name} goes first.`,'inf');
+    const turnsTxt=S.maxTurns>0?S.maxTurns+' turns':'Unlimited turns';
+    SFX.ok();toast(`Game started! ${turnsTxt}, ${timerTxt}. ${S.players[0].name} goes first.`,'inf');
 }
 
 /* ===========================================================
@@ -605,7 +630,7 @@ function updTimer(){const e=$('gTimer');e.textContent=S.timerVal;e.classList.tog
    RENDER ALL
 =========================================================== */
 function renderAll(){renderBoard();renderKeyboard();renderSelBar();renderPlayers();renderMob();renderHistory();renderTurn();
-$('gTurn').textContent=S.turn;$('gWords').textContent=S.history.length;$('gRoomCode').textContent=S.roomCode||'LOCAL'}
+$('gTurn').textContent=S.maxTurns>0?`${S.turn} / ${S.maxTurns}`:S.turn;$('gWords').textContent=S.history.length;$('gRoomCode').textContent=S.roomCode||'LOCAL'}
 
 /* ===========================================================
    BOARD
@@ -776,6 +801,14 @@ function advanceTurn(){
     S.curPI=(S.curPI+1)%S.players.length;
     if(S.curPI===0)S.turn++;
     S.pickedLetter=null;S.selectedCell=null;
+
+    // Check if max turns reached (all players got equal turns)
+    if(S.maxTurns>0&&S.turn>S.maxTurns){
+        toast('All turns completed! Game over.','inf');
+        endGame();
+        return;
+    }
+
     renderAll();startTimer();
     if(S.mode==='online'&&S.isHost)broadcastGS();
 }
@@ -934,6 +967,7 @@ $('createBtn').addEventListener('click',()=>{
     const name=$('hostName').value.trim();if(!name){toast('Enter your name.','er');$('hostName').focus();return}
     S.mode='online';S.isHost=true;S.myName=name;S.roomCode=genCode();S.maxPlayers=Number($('onlineCount').value);
     S.customTimer=Number($('onlineTimer').value);
+    S.maxTurns=Number($('onlineTurns').value);
     setConn(false,'Connecting...');
     S.peer=new Peer(C.PRE+S.roomCode,{debug:0,config:ICE_CFG});
     S.peer.on('open',id=>{
